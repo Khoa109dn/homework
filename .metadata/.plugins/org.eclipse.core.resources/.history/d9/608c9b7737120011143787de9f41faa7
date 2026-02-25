@@ -1,0 +1,130 @@
+#include <stdint.h>
+#include "stm32f103xb.h"
+
+/* --- Định nghĩa các hằng số --- */
+#define ADXL345_ADDR      0x53    // Địa chỉ I2C (SDO nối GND)
+#define REG_POWER_CTL     0x2D    // Thanh ghi điều khiển nguồn
+#define REG_DATA_FORMAT   0x31    // Thanh ghi định dạng dữ liệu
+#define REG_DATAX0        0x32    // Thanh ghi dữ liệu trục X (LSB)
+
+/* --- Prototypes --- */
+void I2C1_Init(void);
+void I2C_WriteReg(uint8_t devAddr, uint8_t reg, uint8_t data);
+void I2C_ReadBurst(uint8_t devAddr, uint8_t reg, uint8_t *buffer, uint8_t size);
+void ADXL345_Init(void);
+void ADXL345_ReadXYZ(int16_t *x, int16_t *y, int16_t *z);
+
+/* --- Các hàm đợi I2C (Inline để tăng tốc độ) --- */
+static inline void i2c_wait_sb(void)    { while (!(I2C1->SR1 & I2C_SR1_SB)); }
+static inline void i2c_wait_addr(void)  { while (!(I2C1->SR1 & I2C_SR1_ADDR)); (void)I2C1->SR2; }
+static inline void i2c_wait_txe(void)   { while (!(I2C1->SR1 & I2C_SR1_TXE)); }
+static inline void i2c_wait_rxne(void)  { while (!(I2C1->SR1 & I2C_SR1_RXNE)); }
+
+/**
+ * @brief Khởi tạo I2C1 trên chân PB6 (SCL) và PB7 (SDA)
+ */
+void I2C1_Init(void) {
+    // 1. Bật Clock cho GPIOB và I2C1
+    RCC->APB2ENR |= RCC_APB2ENR_IOPBEN | RCC_APB2ENR_AFIOEN;
+    RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
+
+    // 2. Cấu hình PB6, PB7: Alternate Function Open-Drain, 50MHz
+    // Xóa 8 bit cao của CRL (tương ứng chân 6 và 7) sau đó set 0xFF
+    GPIOB->CRL &= ~(0xFF000000);
+    GPIOB->CRL |=  (0xFF000000);
+
+    // 3. Reset mềm bộ I2C để đảm bảo trạng thái sạch
+    I2C1->CR1 |= I2C_CR1_SWRST;
+    I2C1->CR1 &= ~I2C_CR1_SWRST;
+
+    // 4. Cấu hình thời gian (Giả định PCLK1 = 36MHz)
+    I2C1->CR2 = 36;           // Tần số ngoại vi 36MHz
+    I2C1->CCR = 180;          // 100kHz Standard Mode ($180 \times 1/36MHz = 5\mu s$, Chu kỳ $10\mu s$)
+    I2C1->TRISE = 37;         // Maximum rise time
+
+    // 5. Bật I2C
+    I2C1->CR1 |= I2C_CR1_PE;
+}
+
+/**
+ * @brief Ghi 1 byte vào thanh ghi cảm biến
+ */
+void I2C_WriteReg(uint8_t devAddr, uint8_t reg, uint8_t data) {
+    I2C1->CR1 |= I2C_CR1_START;         // Tạo điều kiện START
+    i2c_wait_sb();
+
+    I2C1->DR = (devAddr << 1);          // Gửi địa chỉ thiết bị (Write bit = 0)
+    i2c_wait_addr();
+
+    I2C1->DR = reg;                     // Gửi địa chỉ thanh ghi
+    i2c_wait_txe();
+
+    I2C1->DR = data;                    // Gửi dữ liệu
+    while (!(I2C1->SR1 & I2C_SR1_BTF)); // Đợi truyền xong xuôi
+
+    I2C1->CR1 |= I2C_CR1_STOP;          // Tạo điều kiện STOP
+}
+
+/**
+ * @brief Đọc nhiều byte liên tiếp từ cảm biến (Burst Read)
+ */
+void I2C_ReadBurst(uint8_t devAddr, uint8_t reg, uint8_t *buffer, uint8_t size) {
+    // Giai đoạn 1: Gửi địa chỉ muốn đọc
+    I2C1->CR1 |= I2C_CR1_START;
+    i2c_wait_sb();
+    I2C1->DR = (devAddr << 1);
+    i2c_wait_addr();
+    I2C1->DR = reg;
+    i2c_wait_txe();
+
+    // Giai đoạn 2: Restart để bắt đầu nhận dữ liệu
+    I2C1->CR1 |= I2C_CR1_START;
+    i2c_wait_sb();
+    I2C1->DR = (devAddr << 1) | 1;      // Địa chỉ thiết bị (Read bit = 1)
+    i2c_wait_addr();
+
+    I2C1->CR1 |= I2C_CR1_ACK;           // Bật ACK để nhận nhiều byte
+
+    for (uint8_t i = 0; i < size; i++) {
+        if (i == size - 1) {
+            I2C1->CR1 &= ~I2C_CR1_ACK;  // Byte cuối cùng gửi NACK
+            I2C1->CR1 |= I2C_CR1_STOP;  // Gửi STOP sau khi nhận xong
+        }
+        i2c_wait_rxne();
+        buffer[i] = I2C1->DR;           // Lưu dữ liệu vào mảng
+    }
+}
+
+void ADXL345_Init(void) {
+    // Đưa cảm biến về chế độ đo (Measure Mode)
+    I2C_WriteReg(ADXL345_ADDR, REG_POWER_CTL, 0x08);
+    // Cấu hình: Full resolution, +/- 16g (0x0B) hoặc 2g (0x08)
+    I2C_WriteReg(ADXL345_ADDR, REG_DATA_FORMAT, 0x0B);
+}
+
+void ADXL345_ReadXYZ(int16_t *x, int16_t *y, int16_t *z) {
+    uint8_t data[6];
+    // Đọc một mạch 6 byte từ DATAX0 đến DATAZ1
+    I2C_ReadBurst(ADXL345_ADDR, REG_DATAX0, data, 6);
+
+    // Ghép 2 byte thành số 16-bit có dấu (Little Endian)
+    *x = (int16_t)((data[1] << 8) | data[0]);
+    *y = (int16_t)((data[3] << 8) | data[2]);
+    *z = (int16_t)((data[5] << 8) | data[4]);
+}
+
+int main(void) {
+    int16_t x_raw, y_raw, z_raw;
+
+    // 1. Khởi tạo hệ thống
+    I2C1_Init();
+    ADXL345_Init();
+
+    while (1) {
+        // 2. Đọc dữ liệu
+        ADXL345_ReadXYZ(&x_raw, &y_raw, &z_raw);
+
+        // 3. Delay để dễ quan sát trong Watch Window
+        for(volatile int i = 0; i < 200000; i++);
+    }
+}

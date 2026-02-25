@@ -1,0 +1,6 @@
+../Src/spi.c:3:6:SPI_Master_Init	1
+../Src/spi.c:20:6:SPI_Slave_Init	1
+../Src/spi.c:36:6:SPI_Transmit	4
+../Src/spi.c:46:6:SPI_Recieve	4
+../Src/spi.c:58:6:cs_enable	1
+../Src/spi.c:63:6:cs_disable	1

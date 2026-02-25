@@ -1,0 +1,63 @@
+#include <stdint.h>
+#include <stdio.h>
+#include "stm32f103xb.h"
+
+void UART1_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN | RCC_APB2ENR_USART1EN;
+    GPIOA->CRH &= ~(0xFF << 4);
+    GPIOA->CRH |=  (0x4B << 4);
+    USART1->BRR = 0x341;
+    USART1->CR1 |= USART_CR1_TE | USART_CR1_RE | USART_CR1_UE;
+}
+
+void UART1_Print(char* str) {
+    while(*str) {
+        while(!(USART1->SR & USART_SR_TXE));
+        USART1->DR = *str++;
+    }
+}
+
+void ADC1_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN | RCC_APB2ENR_ADC1EN;
+    GPIOA->CRL &= ~(0xF << 0);
+    ADC1->SQR3 = 0;
+    ADC1->SMPR2 |= (0x7 << 0);
+    ADC1->CR2 |= ADC_CR2_ADON;
+    for(volatile int i=0; i<1000; i++);
+    ADC1->CR2 |= ADC_CR2_ADON;
+    ADC1->CR2 |= ADC_CR2_CAL;
+    while(ADC1->CR2 & ADC_CR2_CAL);
+}
+
+uint16_t ADC_Read(void) {
+    ADC1->CR2 |= ADC_CR2_ADON;
+    while(!(ADC1->SR & ADC_SR_EOC));
+    return ADC1->DR;
+}
+
+int main(void) {
+    UART1_Init();
+    ADC1_Init();
+
+    char buf[100];
+    uint16_t adc_val;
+    float temp;
+
+    for(int i=0; i<3; i++) {
+        UART1_Print("\r\n==============================\r\n");
+        UART1_Print("   CODE MOI: DOC NHIET DO LM35\r\n");
+        UART1_Print("==============================\r\n");
+    }
+
+    while(1) {
+        adc_val = ADC_Read();
+
+        /* Cong thuc: (ADC * 330 / 4095) */
+        temp = (float)adc_val * 0.080586f;
+
+        sprintf(buf, "Gia tri ADC: %d | Nhiet do: %.1f C\r\n", adc_val, temp);
+        UART1_Print(buf);
+
+        for(volatile int i=0; i<3000000; i++);
+    }
+}

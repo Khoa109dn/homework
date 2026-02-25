@@ -1,0 +1,47 @@
+#include "stm32f103xb.h"
+#include "spi.h"
+#include "uart1.h"
+#include <stdint.h>
+
+void delay_ms(uint32_t ms) {
+    for(uint32_t i = 0; i < ms * 4000; i++) {}
+}
+
+int main(void) {
+    uart1_init();
+    SPI_Master_Init();
+
+    uart1_write_string("--- MASTER START ---\r\n");
+
+    uint8_t data_1 = '1';
+    uint8_t data_3 = '3';
+    uint8_t rx_val = 0;
+
+    while(1) {
+        // --- GỬI SỐ 1 ---
+        cs_enable();
+        uart1_write_string("Master xuat: 1\r\n");
+        SPI_Transmit(&data_1, 1);
+
+        delay_ms(10);
+        SPI_Recieve(&rx_val, 1);
+        cs_disable();
+
+        if(rx_val == '2') {
+            uart1_write_string("Slave phan hoi: 2\r\n");
+        }
+
+        delay_ms(1000);
+
+        // --- GỬI SỐ 3 ---
+        cs_enable();
+        uart1_write_string("Master xuat: 3\r\n");
+        SPI_Transmit(&data_3, 1);
+
+        delay_ms(10);
+        SPI_Recieve(&rx_val, 1);
+        cs_disable();
+
+        delay_ms(2000);
+    }
+}

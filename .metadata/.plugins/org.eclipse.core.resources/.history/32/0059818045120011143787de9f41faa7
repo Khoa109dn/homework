@@ -1,0 +1,48 @@
+#include <stdint.h>
+#include "stm32f103xb.h"
+
+void GPIO_Init(void) {
+    // Bat clock cho Port C
+    RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
+
+    // Cau hinh PC13: Output 50MHz, Push-pull (Mode 11, CNF 00 -> 0x3)
+    GPIOC->CRH &= ~(0xF << 20);
+    GPIOC->CRH |=  (0x3 << 20);
+}
+
+void TIMER2_Init(void) {
+    // Bat clock cho Timer 2
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+
+    // PCLK1 mac dinh 8MHz (HSI)
+    // PSC = 7999 -> Clock xuong con 1000Hz (1ms moi dem 1 don vi)
+    TIM2->PSC = 7999;
+    // ARR = 999 -> Dem tu 0 den 999 (du 1000 lan) la tron 1 giay
+    TIM2->ARR = 999;
+
+    // Bat ngat khi tran (Update Interrupt)
+    TIM2->DIER |= TIM_DIER_UIE;
+
+    // Cho phep ngat Timer 2 tren he thong
+    NVIC_EnableIRQ(TIM2_IRQn);
+
+    // Bat dau cho Timer chay
+    TIM2->CR1 |= TIM_CR1_CEN;
+}
+
+// Ham xu ly ngat - Se tu dong chay moi khi Timer dem xong 1 giay
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_UIF) {
+        TIM2->SR &= ~TIM_SR_UIF;    // Xoa co ngat
+        GPIOC->ODR ^= GPIO_ODR_ODR13; // Dao trang thai LED
+    }
+}
+
+int main(void) {
+    GPIO_Init();
+    TIMER2_Init();
+
+    while(1) {
+        // while de trong vi LED da tu nhay trong ham ngat (Interrupt)
+    }
+}

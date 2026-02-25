@@ -1,13 +1,46 @@
-#include "led_timer.h"
+#include <stdint.h>
+#include "stm32f103xb.h"
+
+void GPIO_Init(void) {
+
+    RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
+
+    GPIOC->CRH &= ~(0xF << 20);
+    GPIOC->CRH |=  (0x3 << 20);
+}
+
+void TIMER2_Init(void) {
+
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+
+
+    TIM2->PSC = 7999;
+
+    TIM2->ARR = 999;
+
+
+    TIM2->DIER |= TIM_DIER_UIE;
+
+
+    NVIC_EnableIRQ(TIM2_IRQn);
+
+
+    TIM2->CR1 |= TIM_CR1_CEN;
+}
+
+
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_UIF) {
+        TIM2->SR &= ~TIM_SR_UIF;
+        GPIOC->ODR ^= GPIO_ODR_ODR13;
+    }
+}
 
 int main(void) {
-    // Lưu ý: Đảm bảo SystemInit() đã cấu hình Clock (HSE -> PLL -> 72MHz)
+    GPIO_Init();
+    TIMER2_Init();
 
-    LED_Timer_Init();
+    while(1) {
 
-    while (1) {
-        // CPU rảnh hoàn toàn để làm việc khác
-        // Hoặc ngủ để tiết kiệm điện
-        __WFI();
     }
 }

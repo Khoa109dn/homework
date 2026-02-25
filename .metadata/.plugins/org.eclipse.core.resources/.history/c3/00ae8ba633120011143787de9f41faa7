@@ -1,0 +1,76 @@
+#include "stm32f103xb.h"
+#include <stdint.h>
+
+/* --- Định nghĩa UART1 --- */
+#define UART1EN    (1U << 14)
+#define SR_TXE     (1U << 7)
+
+void uart1_init(void) {
+    RCC->APB2ENR |= (1U << 2) | UART1EN;
+    GPIOA->CRH &= ~(0xFF << 4);
+    GPIOA->CRH |= (0xB << 4);  // PA9 TX: AF push-pull
+    GPIOA->CRH |= (0x4 << 8);  // PA10 RX: Floating input
+    USART1->BRR = 0x341;       // 9600 Baud @ 8MHz
+    USART1->CR1 = (1U << 13) | (1U << 3) | (1U << 2);
+}
+
+void uart1_write_string(const char *str) {
+    while (*str) {
+        while (!(USART1->SR & SR_TXE));
+        USART1->DR = (*str++ & 0xFF);
+    }
+}
+
+/* --- Định nghĩa SPI1 MASTER --- */
+void SPI_Master_Init(void) {
+    RCC->APB2ENR |= (1U << 12) | (1U << 2); // SPI1 EN, GPIOA EN
+    // PA5(SCK): AFPP, PA6(MISO): Input, PA7(MOSI): AFPP
+    GPIOA->CRL &= ~(0xFFF << 20);
+    GPIOA->CRL |= (0xB << 20) | (0x4 << 24) | (0xB << 28);
+    // PA4(CS): Output Push-pull
+    GPIOA->CRL &= ~(0xF << 16);
+    GPIOA->CRL |= (0x3 << 16);
+
+    SPI1->CR1 = (1U << 2) | (0x3 << 3) | (1U << 6); // Master, fPCLK/16, SPE
+}
+
+void cs_enable(void) { GPIOA->ODR &= ~(1U << 4); }
+void cs_disable(void) { GPIOA->ODR |= (1U << 4); }
+
+uint8_t spi_tranceive(uint8_t data) {
+    while (!(SPI1->SR & (1U << 1))); // Chờ TXE
+    SPI1->DR = data;
+    while (!(SPI1->SR & (1U << 0))); // Chờ RXNE
+    return (uint8_t)SPI1->DR;
+}
+
+void delay_ms(uint32_t ms) {
+    for(uint32_t i = 0; i < ms * 1000; i++);
+}
+
+int main(void) {
+    uart1_init();
+    SPI_Master_Init();
+    uart1_write_string("--- MASTER: Ready ---\r\n");
+
+    while(1) {
+        // Gửi 1
+        cs_enable();
+        uart1_write_string("Master xuat: 1\r\n");
+        spi_tranceive('1');
+        delay_ms(10);
+        uint8_t res = spi_tranceive(0xFF); // Nhận phản hồi
+        cs_disable();
+        if(res == '2') uart1_write_string("Slave phan hoi: 2\r\n");
+
+        delay_ms(1000);
+
+        // Gửi 3
+        cs_enable();
+        uart1_write_string("Master xuat: 3\r\n");
+        spi_tranceive('3');
+        cs_disable();
+
+        delay_ms(2000);
+    }
+}

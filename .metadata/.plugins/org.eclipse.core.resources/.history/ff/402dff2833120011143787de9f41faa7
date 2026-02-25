@@ -1,0 +1,10 @@
+#ifndef UART1_H_
+#define UART1_H_
+
+#include "stm32f103xb.h"
+
+void uart1_init(void);
+void uart1_write(int ch);
+void uart1_write_string(const char *str);
+
+#endif

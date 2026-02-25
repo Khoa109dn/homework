@@ -1,0 +1,56 @@
+#include "stm32f103xb.h"
+#include <stdint.h>
+
+/* --- Định nghĩa UART1 --- */
+void uart1_init(void) {
+    RCC->APB2ENR |= (1U << 2) | (1U << 14);
+    GPIOA->CRH &= ~(0xFF << 4);
+    GPIOA->CRH |= (0xB << 4) | (0x4 << 8);
+    USART1->BRR = 0x341;
+    USART1->CR1 = (1U << 13) | (1U << 3) | (1U << 2);
+}
+
+void uart1_write(char c) {
+    while (!(USART1->SR & (1U << 7)));
+    USART1->DR = c;
+}
+
+void uart1_write_string(const char *str) {
+    while (*str) uart1_write(*str++);
+}
+
+/* --- Định nghĩa SPI1 SLAVE --- */
+void SPI_Slave_Init(void) {
+    RCC->APB2ENR |= (1U << 12) | (1U << 2);
+    // PA5(SCK): Input, PA6(MISO): AFPP, PA7(MOSI): Input
+    GPIOA->CRL &= ~(0xFFF << 20);
+    GPIOA->CRL |= (0x4 << 20) | (0xB << 24) | (0x4 << 28);
+    // PA4(NSS): Input
+    GPIOA->CRL &= ~(0xF << 16);
+    GPIOA->CRL |= (0x4 << 16);
+
+    SPI1->CR1 = (1U << 6); // SPE: SPI Enable, Slave mode
+}
+
+int main(void) {
+    uart1_init();
+    SPI_Slave_Init();
+    uart1_write_string("--- SLAVE: Ready ---\r\n");
+
+    while(1) {
+        // Chờ nhận dữ liệu
+        while (!(SPI1->SR & (1U << 0)));
+        uint8_t rx = (uint8_t)SPI1->DR;
+
+        if(rx == '1' || rx == '3') {
+            uart1_write_string("[SLAVE] Da nhan: ");
+            uart1_write(rx);
+            uart1_write_string("\r\n");
+
+            // Chuẩn bị gửi lại 2
+            while (!(SPI1->SR & (1U << 1)));
+            SPI1->DR = '2';
+            uart1_write_string("[SLAVE] Xuat phan hoi: 2\r\n");
+        }
+    }
+}

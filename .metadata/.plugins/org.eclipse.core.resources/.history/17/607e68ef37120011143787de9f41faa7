@@ -1,0 +1,92 @@
+#include <stdint.h>
+#include "stm32f103xb.h"
+
+// Địa chỉ I2C ADXL345 (khi SDO nối GND)
+#define ADXL345_ADDR      0x53
+#define REG_POWER_CTL     0x2D
+#define REG_DATA_FORMAT   0x31
+#define REG_DATAX0        0x32
+
+// Hàm đợi trạng thái I2C
+static inline void i2c_wait_sb(void)    { while (!(I2C1->SR1 & I2C_SR1_SB)); }
+static inline void i2c_wait_addr(void)  { while (!(I2C1->SR1 & I2C_SR1_ADDR)); (void)I2C1->SR2; }
+static inline void i2c_wait_txe(void)   { while (!(I2C1->SR1 & I2C_SR1_TXE)); }
+static inline void i2c_wait_rxne(void)  { while (!(I2C1->SR1 & I2C_SR1_RXNE)); }
+
+// Khởi tạo I2C1 (PB6=SCL, PB7=SDA)
+void I2C1_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPBEN | RCC_APB2ENR_AFIOEN;
+    RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
+
+    // PB6, PB7: AF Open-drain, 50MHz
+    GPIOB->CRL &= ~(0xFF000000);
+    GPIOB->CRL |=  (0xFF000000);
+
+    I2C1->CR1 |= I2C_CR1_SWRST;
+    I2C1->CR1 &= ~I2C_CR1_SWRST;
+
+    I2C1->CR2 = 36;    // PCLK1 = 36MHz
+    I2C1->CCR = 180;   // 100kHz
+    I2C1->TRISE = 37;
+    I2C1->CR1 |= I2C_CR1_PE;
+}
+
+// Ghi dữ liệu I2C
+void I2C_WriteReg(uint8_t devAddr, uint8_t reg, uint8_t data) {
+    I2C1->CR1 |= I2C_CR1_START;
+    i2c_wait_sb();
+    I2C1->DR = (devAddr << 1);
+    i2c_wait_addr();
+    I2C1->DR = reg;
+    i2c_wait_txe();
+    I2C1->DR = data;
+    while (!(I2C1->SR1 & I2C_SR1_BTF));
+    I2C1->CR1 |= I2C_CR1_STOP;
+}
+
+// Đọc 6 byte dữ liệu (X, Y, Z) cùng lúc
+void ADXL345_ReadXYZ(int16_t *x, int16_t *y, int16_t *z) {
+    uint8_t data[6];
+
+    // Gửi địa chỉ bắt đầu đọc
+    I2C1->CR1 |= I2C_CR1_START;
+    i2c_wait_sb();
+    I2C1->DR = (ADXL345_ADDR << 1);
+    i2c_wait_addr();
+    I2C1->DR = REG_DATAX0;
+    i2c_wait_txe();
+
+    // Restart để nhận dữ liệu
+    I2C1->CR1 |= I2C_CR1_START;
+    i2c_wait_sb();
+    I2C1->DR = (ADXL345_ADDR << 1) | 1;
+    i2c_wait_addr();
+
+    I2C1->CR1 |= I2C_CR1_ACK;
+    for (int i = 0; i < 6; i++) {
+        if (i == 5) { // Byte cuối cùng
+            I2C1->CR1 &= ~I2C_CR1_ACK;
+            I2C1->CR1 |= I2C_CR1_STOP;
+        }
+        i2c_wait_rxne();
+        data[i] = I2C1->DR;
+    }
+
+    *x = (int16_t)((data[1] << 8) | data[0]);
+    *y = (int16_t)((data[3] << 8) | data[2]);
+    *z = (int16_t)((data[5] << 8) | data[4]);
+}
+
+int main(void) {
+    int16_t x, y, z;
+
+    I2C1_Init();
+    // Khởi tạo cảm biến
+    I2C_WriteReg(ADXL345_ADDR, REG_POWER_CTL, 0x08);   // Bật chế độ đo
+    I2C_WriteReg(ADXL345_ADDR, REG_DATA_FORMAT, 0x0B); // +/- 16g, Full Res
+
+    while (1) {
+        ADXL345_ReadXYZ(&x, &y, &z);
+        for(volatile int i=0; i<200000; i++); // Delay
+    }
+}

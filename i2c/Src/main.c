@@ -1,31 +1,36 @@
-#include "adxl345.h"
-#include "uart.h"
-#include <stdio.h>
+#include <stdint.h>
+#include "stm32f103xb.h"
 
-int main(void)
-{
-    // Cần đảm bảo System Clock (SystemInit) đã được cấu hình
+void GPIO_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
+    GPIOC->CRH &= ~(0xF << 20);
+    GPIOC->CRH |=  (0x3 << 20); // PC13 Output 50MHz
+}
 
-    I2C1_Init();
-    UART1_Init();
-    ADXL345_Init_RegLevel();
+void TIMER2_Init(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
 
-    int16_t acc_raw_x, acc_raw_y, acc_raw_z;
+    TIM2->PSC = 7999;
+    TIM2->ARR = 999;
 
-    UART1_Transmit_String("STM32F103C8T6 - ADXL345 Running!\r\n");
+    TIM2->DIER |= TIM_DIER_UIE;
+    NVIC_EnableIRQ(TIM2_IRQn);
 
-    while (1)
-    {
-        ADXL345_Read_Accel_Raw_RegLevel(&acc_raw_x, &acc_raw_y, &acc_raw_z);
+    TIM2->CR1 |= TIM_CR1_CEN;
+}
 
-        UART1_Transmit_String("X: ");
-        UART1_Transmit_Number(acc_raw_x);
-        UART1_Transmit_String(" | Y: ");
-        UART1_Transmit_Number(acc_raw_y);
-        UART1_Transmit_String(" | Z: ");
-        UART1_Transmit_Number(acc_raw_z);
-        UART1_Transmit_String("\r\n");
+void TIM2_IRQHandler(void) {
+    if (TIM2->SR & TIM_SR_UIF) {
+        TIM2->SR &= ~TIM_SR_UIF;
+        GPIOC->ODR ^= GPIO_ODR_ODR13;
+    }
+}
 
-        delay_us(200000); // 200ms delay
+int main(void) {
+    GPIO_Init();
+    TIMER2_Init();
+
+    while(1) {
+        // Chip rảnh tay để làm việc khác ở đây
     }
 }

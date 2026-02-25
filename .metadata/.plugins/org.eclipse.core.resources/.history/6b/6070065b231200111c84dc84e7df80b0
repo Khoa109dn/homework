@@ -1,0 +1,50 @@
+#define RCC_BASE      0x40021000UL
+#define GPIOA_BASE    0x40010800UL
+#define GPIOC_BASE    0x40011000UL
+
+// Thanh ghi Clock
+#define RCC_APB2ENR   (*(volatile unsigned int *)(RCC_BASE + 0x18UL))
+
+// Thanh ghi cấu hình và dữ liệu GPIOC (LED - PC13)
+#define GPIOC_CRH     (*(volatile unsigned int *)(GPIOC_BASE + 0x04UL))
+#define GPIOC_ODR     (*(volatile unsigned int *)(GPIOC_BASE + 0x0CUL))
+
+// Thanh ghi cấu hình và dữ liệu GPIOA (Nút nhấn - PA0)
+#define GPIOA_CRL     (*(volatile unsigned int *)(GPIOA_BASE + 0x00UL))
+#define GPIOA_IDR     (*(volatile unsigned int *)(GPIOA_BASE + 0x08UL))
+#define GPIOA_ODR     (*(volatile unsigned int *)(GPIOA_BASE + 0x0CUL))
+
+// Bits
+#define IOPAEN        (1U<<2)  // Enable Clock cho Port A
+#define IOPCEN        (1U<<4)  // Enable Clock cho Port C
+#define LED_PIN       (1U<<13)
+#define BUTTON_PIN    (1U<<0)  // PA0
+
+void GPIO_Init(void) {
+    // 1. Bật Clock cho cả Port A và Port C
+    RCC_APB2ENR |= (IOPAEN | IOPCEN);
+
+    // 2. Cấu hình PC13 là Output (Push-pull, 2MHz)
+    GPIOC_CRH &= ~(0xFU << 20); // Xóa bit 20,21,22,23
+    GPIOC_CRH |= (0x2U << 20);  // Mode 0x2 (Output 2MHz)
+
+    // 3. Cấu hình PA0 là Input Pull-up/Pull-down
+    GPIOA_CRL &= ~(0xFU << 0);  // Xóa bit 0,1,2,3
+    GPIOA_CRL |= (0x8U << 0);   // Mode 0x8 (Input with pull-up/pull-down)
+
+    // Chọn Pull-up (Set ODR = 1 cho chân PA0)
+    GPIOA_ODR |= BUTTON_PIN;
+}
+
+int main(void) {
+    GPIO_Init();
+
+    while (1) {
+        // Kiểm tra nếu chân PA0 bị kéo xuống mức 0 (Nút được nhấn)
+        if (!(GPIOA_IDR & BUTTON_PIN)) {
+            GPIOC_ODR &= ~LED_PIN; // Bật LED (Thường LED PC13 bật ở mức thấp)
+        } else {
+            GPIOC_ODR |= LED_PIN;  // Tắt LED
+        }
+    }
+}
